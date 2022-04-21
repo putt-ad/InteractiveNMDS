@@ -1,0 +1,96 @@
+---
+title: "How to make NMDS with geochemical ordinations and interactive"
+author: "Putt, Andrew"
+date: "12/8/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## This is a step by step guide to NMDS using bray curtis distance matrix with a square root transformation. The data linked to this is provided by Andrew Putt and are live links meaning these data are subject to change without notice.
+
+## before we begin, let us load the required packages
+```{r}
+required.packages <- c("ggplot2", "vegan", "stats", "dplyr", "graphics", "base","plotly")
+new.packages <- required.packages[!(required.packages %in% installed.packages()[,"Package"])]
+if(length(new.packages)) install.packages(new.packages) # install
+lapply(required.packages, require, character.only = TRUE) #  load
+```
+
+## Step 1. make a distance matrix using an OTU table 
+```{r}
+ASV_table <- as.data.frame(read.csv('https://raw.githubusercontent.com/putt-ad/InteractiveNMDS/main/ASV_shortID_bray.csv', sep = ",",row.names = 1))
+glimpse(ASV_table)
+```
+
+## Step 2. make a bray curtis dissimilarity matrix
+```{r}
+set.seed(100)
+#making an NMDS dataframe. output is square root transformed to normalize distances
+ASV_NMDS <- metaMDS(ASV_table, k=3, trace = TRUE, try=10 ,trymax = 50) #  try=min restarts, trymax=maximum restart, #k=dimensions
+ASV_NMDS #summary of NMDS solution
+plot(ASV_NMDS)
+```
+
+## Step 3. Use hierarchical clustering to identify groups and make sample tree
+```{r}
+#hierarchy tree to get groups
+ASV_dist <- vegdist(wisconsin(sqrt(ASV_table)), method = "bray")  ## bray curtis dissimilarity
+ASV_tree <- hclust(ASV_dist, method = "average")
+grp <- cutree(ASV_tree, k = 3)
+plot(ASV_tree)
+```
+
+## Step 4. load metadata
+```{r}
+metadata <- as.data.frame(read.csv('https://www.dropbox.com/s/djbkt7vpoqms9f2/bray_chem.csv?dl=1', row.names = 1)) 
+glimpse(metadata)
+```
+
+## Step 5. environmental ordination (click run botton or this will error)
+```{r}
+env_ord <- envfit(ASV_NMDS, metadata, na.rm = TRUE, permu = 1000)
+env_vector <- as.data.frame(scores(env_ord, display = "vectors"))
+env_vector <- cbind(env_vector, Species = rownames(env_vector))
+plot(ASV_NMDS, display = 'sites')
+plot(env_ord, p.max = 0.05) #selects only metadata variables that have a p-value <0.05
+```
+
+## Step 6. extract NMDS coordinates as site scores
+```{r}
+nmds.scores <- as.data.frame(scores(ASV_NMDS))
+nmds.scores$site <- rownames(nmds.scores)
+nmds.scores$grp <- grp
+head(nmds.scores)
+```
+
+## Step 7. Plot NMDS with 95% confidence interval
+```{r}
+ggplot() + 
+  stat_ellipse(data=nmds.scores, aes(x=NMDS1,y=NMDS2, fill = as.factor(grp), color = as.factor(grp)),  linetype = 2, geom = "polygon", alpha = 0.2) +# add ellipse
+  geom_point(data=nmds.scores,aes(x=NMDS1,y=NMDS2, color=as.factor(grp)),size=2) + 
+  coord_fixed() + #must have a fixed centroid
+  geom_segment(data = env_vector, # vector arrows
+               aes(x = 0, xend = NMDS1, y = 0, yend = NMDS2),
+               arrow = arrow(length = unit(0.25, "cm")), colour = "grey50") +
+  geom_text(data = env_vector, aes(x = NMDS1, y = NMDS2, label = Species), # vector labels
+            size = 3) +
+  theme_bw()
+```
+
+## Step 8. Interactive NMDS Plot use mouse to zoom in and click on data points
+```{r}
+merged_df <- merge(nmds.scores, metadata, by=0, all=TRUE) #this merges by row.names
+ggplotly(ggplot() + 
+ geom_point(data=merged_df,aes(x=NMDS1,y=NMDS2, color=Nitrate),size=2) +  # add the point markers
+#geom_text(data=asv_nmds_axes,aes(x=NMDS1,y=NMDS2,label=site),size=1,vjust=0) + #this adds labels to your data
+  coord_fixed() + #must have a fixed centroid
+  geom_segment(data = env_vector, # vector arrows
+               aes(x = 0, xend = NMDS1, y = 0, yend = NMDS2),
+               arrow = arrow(length = unit(0.25, "cm")), colour = "grey50") +
+  geom_text(data = env_vector, aes(x = NMDS1, y = NMDS2, label = Species), # vector labels
+            size = 3) +
+  theme_bw())
+```
